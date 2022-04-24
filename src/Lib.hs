@@ -49,8 +49,6 @@ stringMovesToMoves moves (Just move : rest) = case stringMovesToMoves moves rest
   Nothing -> Nothing
   Just restMoves -> Just (move : restMoves)
 
--- stringMovesToMoves moves (Just move : rest) = stringMovesToMoves (moves ++ [move]) rest
-
 -- | Auxiliary method for simulateGame
 simulateGameAux :: GameState -> [GameMoves] -> String
 simulateGameAux state [] = stateToString state
@@ -221,14 +219,14 @@ isValidSuperCard (Coordinate x1 y1) (Coordinate x2 y2) card allCards =
 -- | - Destination is not one of your own pawns
 -- | - You're trying to move a pawn that is yours
 isValidMove :: GameState -> GameMoves -> Bool
-isValidMove (GameState cards pawnCoordinates opponentPawns 0 _ _) (GameMoves card source destination False) =
-  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 0 source destination card (take 2 cards) && not (null opponentPawns)
+isValidMove state@(GameState cards pawnCoordinates opponentPawns 0 _ _) moves@(GameMoves card source destination False) =
+  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 0 source destination card (take 2 cards)
 isValidMove (GameState cards opponentPawns pawnCoordinates 1 _ _) (GameMoves card source destination False) =
-  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 1 source destination card (take 2 (drop 2 cards)) && not (null opponentPawns)
+  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 1 source destination card (take 2 (drop 2 cards))
 isValidMove (GameState cards opponentPawns pawnCoordinates 0 False _) (GameMoves card source destination True) =
-  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 (drop 2 cards)) && not (null opponentPawns)
+  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 cards)
 isValidMove (GameState cards opponentPawns pawnCoordinates 1 _ False) (GameMoves card source destination True) =
-  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 (drop 2 cards)) && not (null opponentPawns)
+  isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 (drop 2 cards))
 isValidMove _ _ = False
 
 hasWon :: GameState -> GameMoves -> Bool
