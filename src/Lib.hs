@@ -30,23 +30,85 @@ simulateGame file = do
       Just state ->
         if isValidState state == "None"
           then do
-            case stringMovesToMoves [] $ stringToMove (tail inputLines) of
+            case stringMovesToMoves $ stringToMove (tail inputLines) of
               Nothing -> return "InvalidFormat"
               Just moves -> return $ simulateGameAux state moves
           else return $ isValidState state
 
 generateGame :: Integer -> Integer -> String
-generateGame _ _ = undefined
+generateGame seed n =
+  if n < 0
+    then error "Number of moves must be greater than or equal to 0"
+    else do
+      let state = GameState (generateCards $ mkStdGen (fromIntegral seed)) [Coordinate 0 2, Coordinate 0 0, Coordinate 0 1, Coordinate 0 3, Coordinate 0 4] [Coordinate 4 2, Coordinate 4 0, Coordinate 4 1, Coordinate 4 3, Coordinate 4 4] 0 False False
+      let moves = makeMoves (replicate (fromIntegral n) 1) (mkStdGen (fromIntegral seed)) state []
+      stateToString state ++ "\n" ++ movesToString moves
+
+movesToString :: [GameMoves] -> String
+movesToString moves =
+  if null moves
+    then ""
+    else moveToString (head moves) ++ "\n" ++ movesToString (tail moves)
+
+makeMoves :: [Int] -> StdGen -> GameState -> [GameMoves] -> [GameMoves]
+makeMoves [] _ _ moves = moves
+makeMoves list seed (GameState _ [] _ _ _ _) moves = moves
+makeMoves list seed (GameState _ _ [] _ _ _) moves = moves
+makeMoves (x : xs) seed state moves = do
+  let index = randomR (0, length (filter (isValidMove state) (currentPossibleMoves state)) - 1) seed
+  let move = filter (isValidMove state) (currentPossibleMoves state) !! fst index
+  let movedState = movePawn state move
+  makeMoves xs (snd index) movedState (moves ++ [move])
+
+-- Generates random cards from the seed
+-- HACK: If the random generator somehow shuffles through the same 4 numbers, this method will loop forever
+generateCards :: StdGen -> [Card]
+generateCards seed = map (allCards !!) (take 5 . nub $ randomRs (0, 15) seed)
+
+currentPossibleMoves :: GameState -> [GameMoves]
+currentPossibleMoves (GameState cards@[card1, card2, _, _, _] player1Coordinates player2Coordinates 0 player1Super player2Super) = do
+  cards <- [card1, card2]
+  coords <- player1Coordinates
+  moves <- possibleMoves cards
+  return (GameMoves cards coords (Coordinate (x coords + x moves) (y coords + y moves)) False)
+currentPossibleMoves (GameState cards@[_, _, card3, card4, _] player1Coordinates player2Coordinates 1 player1Super player2Super) = do
+  cards <- [card3, card4]
+  coords <- player2Coordinates
+  moves <- possibleMoves cards
+  return (GameMoves cards coords (Coordinate (x coords - x moves) (y coords - y moves)) False)
+currentPossibleMoves _ = undefined
 
 countGames :: Integer -> FilePath -> IO String
-countGames _ _ = undefined
+countGames n file =
+  if n < 0
+    then error "Number of moves must be greater than or equal to 0"
+    else do
+      input <- readFile file
+      let inputLines = lines input
+      if null inputLines
+        then return "InvalidFormat"
+        else case stringToState (head inputLines) of
+          Nothing -> return "InvalidFormat"
+          Just state ->
+            if isValidState state == "None"
+              then do
+                return $ show $ countGamesAux (replicate (fromIntegral n) 1) state 0 0 0
+              else return $ isValidState state
+
+countGamesAux :: [Int] -> GameState -> Int -> Int -> Int -> String
+countGamesAux [] _ total player1Wins player2Wins = show (total, player1Wins, player2Wins)
+countGamesAux _ state@(GameState _ [] _ _ _ _) total player1Wins player2Wins = show (total, player1Wins, player2Wins + 1)
+countGamesAux _ state@(GameState _ _ [] _ _ _) total player1Wins player2Wins = show (total, player1Wins + 1, player2Wins)
+countGamesAux (x : xs) state@(GameState _ player1Coordinates player2Coordinates _ _ _) total player1Wins player2Wins = do
+  validMoves <- filter (isValidMove state) (currentPossibleMoves state)
+  let state = movePawn state validMoves
+  countGamesAux xs state (total + 1) (if null player1Coordinates then player1Wins + 1 else player1Wins) (if null player2Coordinates then player2Wins + 1 else player2Wins)
 
 -- | Get moves from a list of strings and return a list of moves
-stringMovesToMoves :: [GameMoves] -> [Maybe GameMoves] -> Maybe [GameMoves]
-stringMovesToMoves moves [] = Just []
-stringMovesToMoves moves (Nothing : _) = Nothing
-stringMovesToMoves moves (Just move : rest) = case stringMovesToMoves moves rest of
-  Nothing -> Nothing
+stringMovesToMoves :: [Maybe GameMoves] -> Maybe [GameMoves]
+stringMovesToMoves [] = Just []
+stringMovesToMoves (Nothing : _) = Nothing
+stringMovesToMoves (Just move : rest) = case stringMovesToMoves rest of
   Just restMoves -> Just (move : restMoves)
 
 -- | Auxiliary method for simulateGame
@@ -64,12 +126,10 @@ simulateGameAux state (move : ms) =
 sortCardNames :: [String] -> String
 sortCardNames [card1, card2, card3, card4, card5] =
   show (sort [card1, card2] ++ sort [card3, card4] ++ [card5])
-sortCardNames _ = ""
 
 sortCardNamesToList :: [String] -> [String]
 sortCardNamesToList [card1, card2, card3, card4, card5] =
   sort [card1, card2] ++ sort [card3, card4] ++ [card5]
-sortCardNamesToList _ = []
 
 --------------------------------------------------------------------------------
 
@@ -78,7 +138,6 @@ sortCardNamesToList _ = []
 --------------------------------------------------------------------------------
 
 sortPawnCoords :: [(Int, Int)] -> [(Int, Int)]
-sortPawnCoords [] = []
 sortPawnCoords (x : xs) = x : sort xs
 
 pawnCoordsToTuple :: [Coordinate] -> [(Int, Int)]
@@ -147,22 +206,17 @@ pairToCoordinate (x, y) = Coordinate x y
 isValidState :: GameState -> String
 isValidState (GameState cards player1Coords player2Coords turn player1Super player2Super)
   | null player1Coords && null player2Coords = "InvalidState" -- no pawns
-  | length (removeDuplicates (player1Coords ++ player2Coords)) > 10 = "InvalidState" -- too many pawns
+  | length (nub (player1Coords ++ player2Coords)) > 10 = "InvalidState" -- too many pawns
   | length cards /= 5 = "InvalidState" -- not enough cards (or too many)
   | turn < 0 || turn > 1 = "InvalidFormat" -- turn is not 0 or 1
   | not $ all isValidPosition (player1Coords ++ player2Coords) = "InvalidState" -- invalid position
-  | length (removeDuplicates (player1Coords ++ player2Coords)) /= length (player1Coords ++ player2Coords) = "InvalidState" -- duplicate position
-  | sortCoordinates (tail player1Coords) /= tail player1Coords = "InvalidFormat" -- player1 pawns are not in order
-  | sortCoordinates (tail player2Coords) /= tail player2Coords = "InvalidFormat" -- player2 pawns are not in order
+  | length (nub (player1Coords ++ player2Coords)) /= length (player1Coords ++ player2Coords) = "InvalidState" -- duplicate position
+  | not (null (player1Coords)) && sortCoordinates (tail player1Coords) /= tail player1Coords = "InvalidFormat" -- player1 pawns are not in order
+  | not (null (player2Coords)) && sortCoordinates (tail player2Coords) /= tail player2Coords = "InvalidFormat" -- player2 pawns are not in order
   | sortCardNamesToList (map cardName cards) /= map cardName cards = "InvalidFormat" -- cards are not in order
-  | player1Coords == player2Coords = "InvalidState" -- pawns are the same
-  | head player1Coords == Coordinate 4 2 && not (null player2Coords) = "InvalidState" -- player1 has won
-  | head player2Coords == Coordinate 0 2 && not (null player1Coords) = "InvalidState" -- player2 has won
+  | not (null (player1Coords)) && head player1Coords == Coordinate 4 2 && not (null player2Coords) = "InvalidState" -- player1 has won
+  | not (null (player2Coords)) && head player2Coords == Coordinate 0 2 && not (null player1Coords) = "InvalidState" -- player2 has won
   | otherwise = "None" -- valid state
-
-removeDuplicates :: Eq a => [a] -> [a]
-removeDuplicates [] = []
-removeDuplicates (x : xs) = x : removeDuplicates (filter (/= x) xs)
 
 sortCoordinates :: [Coordinate] -> [Coordinate]
 sortCoordinates = sortOn (\(Coordinate x y) -> (x, y))
@@ -189,7 +243,7 @@ stringToMoveAux ((x1, y1), (x2, y2), cardName) =
   if isPrefixOf "Super " cardName
     then case findCard (drop 6 cardName) of -- drop "Super " (with space)
       Just card -> GameMoves card (Coordinate x1 y1) (Coordinate x2 y2) True
-      Nothing -> GameMoves (Card cardName []) (Coordinate x1 y1) (Coordinate x2 y2) True
+      Nothing -> GameMoves (Card (drop 6 cardName) []) (Coordinate x1 y1) (Coordinate x2 y2) True
     else case findCard cardName of
       Just card -> GameMoves card (Coordinate x1 y1) (Coordinate x2 y2) False
       Nothing -> GameMoves (Card cardName []) (Coordinate x1 y1) (Coordinate x2 y2) False
@@ -205,26 +259,20 @@ isValidPosition (Coordinate x y) = x >= 0 && x <= 4 && y >= 0 && y <= 4
 
 isValidCard :: Int -> Coordinate -> Coordinate -> Card -> [Card] -> Bool
 isValidCard 0 (Coordinate x1 y1) (Coordinate x2 y2) card allCards =
-  elem card allCards && elem (Coordinate (x2 - x1) (y2 - y1)) (possibleMoves card)
+  not (null (possibleMoves card)) && elem card allCards && elem (Coordinate (x2 - x1) (y2 - y1)) (possibleMoves card)
 isValidCard 1 (Coordinate x1 y1) (Coordinate x2 y2) card allCards =
-  elem card allCards && elem (Coordinate ((x2 - x1) * (-1)) ((y2 - y1) * (-1))) (possibleMoves card)
-isValidCard _ _ _ _ _ = error "Invalid turn"
+  not (null (possibleMoves card)) && elem card allCards && elem (Coordinate ((x2 - x1) * (-1)) ((y2 - y1) * (-1))) (possibleMoves card)
 
 isValidSuperCard :: Coordinate -> Coordinate -> Card -> [Card] -> Bool
 isValidSuperCard (Coordinate x1 y1) (Coordinate x2 y2) card allCards =
-  elem card allCards && elem (Coordinate (x2 - x1) (y2 - y1)) (possibleMoves superCard)
+  not (null (possibleMoves card)) && elem card allCards && elem (Coordinate (x2 - x1) (y2 - y1)) superCard
 
 -- | Checks whether or not a coordinate is a valid position on the board
--- | Factors:
--- | - Source and destination coordinates are valid
--- | - Destination is not one of your own pawns
--- | - You're trying to move a pawn that is yours
-isValidMove :: GameState -> GameMoves -> Bool
 isValidMove state@(GameState cards pawnCoordinates opponentPawns 0 _ _) moves@(GameMoves card source destination False) =
   isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 0 source destination card (take 2 cards)
 isValidMove (GameState cards opponentPawns pawnCoordinates 1 _ _) (GameMoves card source destination False) =
   isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidCard 1 source destination card (take 2 (drop 2 cards))
-isValidMove (GameState cards pawnCoordinates opponentPawns  0 False _) (GameMoves card source destination True) =
+isValidMove (GameState cards pawnCoordinates opponentPawns 0 False _) (GameMoves card source destination True) =
   isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 cards)
 isValidMove (GameState cards opponentPawns pawnCoordinates 1 _ False) (GameMoves card source destination True) =
   isValidPosition source && isValidPosition destination && elem source pawnCoordinates && notElem destination pawnCoordinates && isValidSuperCard source destination card (take 2 (drop 2 cards))
@@ -232,10 +280,9 @@ isValidMove _ _ = False
 
 hasWon :: GameState -> GameMoves -> Bool
 hasWon (GameState _ player1Coords player2Coords 0 _ _) (GameMoves _ source destination _) =
-  head player1Coords == source && x destination == 4 && y destination == 2 || (head player1Coords == destination)
+  head player1Coords == source && destination == Coordinate 4 2 || (head player2Coords == destination)
 hasWon (GameState _ player1Coords player2Coords 1 _ _) (GameMoves _ source destination _) =
-  head player2Coords == source && x destination == 0 && y destination == 2 || (head player2Coords == destination)
-hasWon _ _ = False
+  head player2Coords == source && destination == Coordinate 0 2 || (head player1Coords == destination)
 
 -- | Along with moving the pawn, it also checks whether or not the game has been won
 movePawn :: GameState -> GameMoves -> GameState
@@ -273,7 +320,6 @@ movePawn state@(GameState [card1, card2, card3, card4, card5] player1Coords play
     0
     superMove1
     (superMove2 || isSuper)
-movePawn _ _ = error "Invalid move"
 
 -- | NOTE: x and y are flipped because of the way the board is drawn
 allCards :: [Card]
@@ -283,7 +329,7 @@ allCards =
     Card "Frog" [Coordinate 0 (-2), Coordinate (-1) 1, Coordinate 1 (-1)],
     Card "Rabbit" [Coordinate (-1) (-1), Coordinate 1 1, Coordinate 0 2],
     Card "Crab" [Coordinate 0 (-2), Coordinate 0 2, Coordinate 1 0],
-    Card "Elephant" [Coordinate 0 (-1), Coordinate 1 (-1), Coordinate 1 1, Coordinate 1 0],
+    Card "Elephant" [Coordinate 0 (-1), Coordinate 1 (-1), Coordinate 1 1, Coordinate 0 1],
     Card "Goose" [Coordinate 1 (-1), Coordinate 0 (-1), Coordinate 0 1, Coordinate 1 (-1)],
     Card "Rooster" [Coordinate 0 (-1), Coordinate (-1) (-1), Coordinate 0 1, Coordinate 1 1],
     Card "Monkey" [Coordinate 1 (-1), Coordinate (-1) (-1), Coordinate 1 1, Coordinate 1 (-1)],
@@ -296,15 +342,17 @@ allCards =
     Card "Cobra" [Coordinate 0 (-1), Coordinate 1 1, Coordinate (-1) 1]
   ]
 
-superCard :: Card
-superCard = Card "Super" [Coordinate 0 1, 
-                          Coordinate 1 0, 
-                          Coordinate 1 1, 
-                          Coordinate (-1) 0, 
-                          Coordinate (-1) 1, 
-                          Coordinate 0 (-1), 
-                          Coordinate 1 (-1), 
-                          Coordinate (-1) (-1)]
+superCard :: [Coordinate]
+superCard =
+  [ Coordinate 0 1,
+    Coordinate 1 0,
+    Coordinate 1 1,
+    Coordinate (-1) 0,
+    Coordinate (-1) 1,
+    Coordinate 0 (-1),
+    Coordinate 1 (-1),
+    Coordinate (-1) (-1)
+  ]
 
 findCard :: String -> Maybe Card
 findCard name = find (\card -> cardName card == name) allCards
@@ -315,31 +363,38 @@ findCard name = find (\card -> cardName card == name) allCards
 
 --------------------------------------------------------------------------------
 
-data Coordinate = Coordinate {x :: Int, y :: Int} deriving (Show, Eq)
+data Coordinate = Coordinate
+  { x :: Int,
+    y :: Int
+  }
+  deriving (Eq, Show)
 
 data Card = Card
   { cardName :: String,
     -- | Coordinate from the pawn, i.e. not the actual position on the board
     possibleMoves :: [Coordinate]
   }
-  deriving (Eq)
+  deriving (Eq, Show)
 
-data GameState = GameState
-  { -- | The current cards in game
-    cards :: [Card],
-    -- | The coordinates of player 1 or 2's pawns
-    player1PawnCoordinates :: [Coordinate],
-    player2PawnCoordinates :: [Coordinate],
-    -- | Which player's turn is it, 0 for player 1, 1 for player 2
-    turn :: Int,
-    -- | Whether or not player 1 or 2 has used their super move
-    player1HasUsedSuperMove :: Bool,
-    player2HasUsedSuperMove :: Bool
-  }
+data GameState
+  = GameState
+      [Card]
+      -- ^ Cards in the deck
+      [Coordinate]
+      -- ^ Coordinates of the player 1's pawns
+      [Coordinate]
+      -- ^ Coordinates of the player 2's pawns
+      Int
+      -- ^ 0 for player 1, 1 for player 2
+      Bool
+      -- ^ Whether or not the player1 has used super card
+      Bool
+      -- ^ Whether or not the player2 has used super card
 
-data GameMoves = GameMoves
-  { card :: Card,
-    sourcePosition :: Coordinate,
-    destinationPosition :: Coordinate,
-    isSuperMove :: Bool
-  }
+data GameMoves
+  = GameMoves
+      Card
+      Coordinate
+      Coordinate
+      Bool
+  deriving (Show)
