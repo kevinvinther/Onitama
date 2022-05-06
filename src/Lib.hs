@@ -31,7 +31,7 @@ simulateGame file = do
         if isValidState state == "None"
           then do
             case stringMovesToMoves $ stringToMove (tail inputLines) of
-              Nothing -> return "InvalidFormat"
+              Nothing -> if null (tail inputLines) then return $ stateToString state else return "InvalidFormat"
               Just moves -> return $ simulateGameAux state moves
           else return $ isValidState state
 
@@ -92,17 +92,22 @@ countGames n file =
           Just state ->
             if isValidState state == "None"
               then do
-                return $ show $ countGamesAux (replicate (fromIntegral n) 1) state 0 0 0
+                return $ show $ countGamesAux (replicate (fromIntegral n) 1) state 1 0 0
               else return $ isValidState state
 
 countGamesAux :: [Int] -> GameState -> Int -> Int -> Int -> String
-countGamesAux [] _ total player1Wins player2Wins = show (total, player1Wins, player2Wins)
-countGamesAux _ state@(GameState _ [] _ _ _ _) total player1Wins player2Wins = show (total, player1Wins, player2Wins + 1)
-countGamesAux _ state@(GameState _ _ [] _ _ _) total player1Wins player2Wins = show (total, player1Wins + 1, player2Wins)
+countGamesAux _ state@(GameState _ [] _ _ _ _) total player1Wins player2Wins = show (total, player1Wins, player2Wins + 1) ++ " "
+countGamesAux _ state@(GameState _ _ [] _ _ _) total player1Wins player2Wins = show (total, player1Wins + 1, player2Wins) ++ " "
+countGamesAux [] _ total player1Wins player2Wins = show (total, player1Wins, player2Wins) ++ " "
 countGamesAux (x : xs) state@(GameState _ player1Coordinates player2Coordinates _ _ _) total player1Wins player2Wins = do
   validMoves <- filter (isValidMove state) (currentPossibleMoves state)
-  let state = movePawn state validMoves
-  countGamesAux xs state (total + 1) (if null player1Coordinates then player1Wins + 1 else player1Wins) (if null player2Coordinates then player2Wins + 1 else player2Wins)
+  let newState = movePawn state validMoves
+  countGamesAux
+    xs
+    newState
+    total
+    player1Wins
+    player2Wins
 
 -- | Get moves from a list of strings and return a list of moves
 stringMovesToMoves :: [Maybe GameMoves] -> Maybe [GameMoves]
